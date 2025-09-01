@@ -139,7 +139,7 @@ def format_doc(row):
     return (f"Doctor: {row['doctor_name']} | Specialty: {row['specialty']} | "
             f"Experience: {row['experience_years']} yrs | Hospital: {row['hospital_name']} ({row['area']}) | Beds: {row['available_beds']}")
 
-def get_chatbot_reply(user_text, filepath="C:\\Users\\Sachi\\Downloads\\database_hosp.csv"):
+def get_chatbot_reply(user_text, filepath="database_hosp.csv"):
     symptom, hospital = extract_symptom_and_hospital(user_text)
     if not symptom:
         return "Sorry, I couldn't identify your health issue. Please rephrase or specify your symptom clearly."
