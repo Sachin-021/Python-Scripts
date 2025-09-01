@@ -1,5 +1,6 @@
 import streamlit as st
 from chatbot import get_chatbot_reply
+from thefuzz import process
 
 st.title("🏥 Medical Chatbot")
 
