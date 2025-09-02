@@ -16,7 +16,7 @@ st.markdown("""
     <style>
         .stButton>button {
             background-color: #4CAF50;
-            color: #FFFACD;  /* Light Yellow */
+            color: #FFFACD;  /* Light yellow text */
             font-size: 18px;
             padding: 10px 24px;
             border-radius: 10px;
@@ -28,22 +28,23 @@ st.markdown("""
             background-color: #45a049;
         }
         .chatbox {
-            background-color: #f9f9f9;
+            background-color: #22223b;   /* DARK NAVY BACKGROUND */
             border-radius: 10px;
             padding: 15px;
             margin-top: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.4);
         }
         .user-msg {
-            color: #333333;
+            color: #e9e9e9;  /* Soft light gray text */
             font-weight: bold;
         }
         .bot-msg {
-            color: #0066cc;
+            color: #89b4fa;  /* Soft blue text for chatbot */
             padding-left: 10px;
         }
     </style>
 """, unsafe_allow_html=True)
+
 
 
 st.title("🏥 Medical Chatbot")
