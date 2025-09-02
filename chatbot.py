@@ -142,7 +142,7 @@ Rules:
 - If the doctor is asked dont give random values,analyse and say
 - If hospital is asked do the same as for doctor
 - Do not share any sensitive reply and be strict towards clarity 
-- Avoid if they ask something not regarding needs
+- If doctors,hospitals are asked provide it for the query given
 
 Examples:
 {examples}
