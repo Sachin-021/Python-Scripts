@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from thefuzz import process
 import psycopg2.extras
-import re
+
 # -------------------- Load Environment Variables --------------------
 load_dotenv()
 
@@ -22,7 +22,6 @@ conn = psycopg2.connect(
     port=os.getenv("DB_PORT")
 )
 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
 
 # -------------------- Prompt Template --------------------
 SYSTEM_PROMPT = """
@@ -41,9 +40,9 @@ You must follow these rules strictly:
    hospital_doctor_data, symptom_specialty
 5. If input is unclear, make the best SQL guess.
 6. Always limit results to MAX 3 rows.
-7. If the user query implies available doctors (words like "available", "free", "now"), always add "AND availability = TRUE" in your SQL WHERE clause.
-8. When filtering text columns such as 'specialty', perform case-insensitive comparisons using ILIKE in PostgreSQL, (e.g.):
-SELECT ... FROM hospital_doctor_data WHERE specialty ILIKE '<specialty>' LIMIT 3;
+7. If the user query implies available doctors, always add "AND availability = TRUE" to your SQL WHERE clause.
+
+
 
 --------------------
 DATABASE SCHEMA
@@ -70,23 +69,22 @@ TASK
 4. Examples:
 
 Example (Doctor query):  
-SELECT doctor_name, specialty, experience_years, availability, hospital_name FROM hospital_doctor_data WHERE doctor_name = '<doctor_name>' LIMIT 3;
+SELECT doctor_name, specialty, experience_years, availability FROM hospital_doctor_data WHERE doctor_name = '<doctor_name>' LIMIT 3;
 
 Example (Hospital query):  
-SELECT doctor_name, specialty, experience_years, availability, hospital_name FROM hospital_doctor_data WHERE hospital_name = '<hospital_name>' LIMIT 3;
+SELECT doctor_name, specialty, experience_years, availability FROM hospital_doctor_data WHERE hospital_name = '<hospital_name>' LIMIT 3;
 
 Example (Symptom query):  
-SELECT doctor_name, specialty, experience_years, availability, hospital_name FROM hospital_doctor_data WHERE specialty IN (SELECT specialty FROM symptom_specialty WHERE symptom_keyword = '<symptom>') LIMIT 3;
+SELECT doctor_name, specialty, experience_years, availability FROM hospital_doctor_data WHERE specialty IN (SELECT specialty FROM symptom_specialty WHERE symptom_keyword = '<symptom>') LIMIT 3;
 """
-
 
 def normalize_input(user_query: str) -> str:
     """Clean up messy user input for better matching"""
     text = user_query.lower()
     text = re.sub(r'\s+', ' ', text)
     text = text.replace("’", "'").replace("''", "'")
-    return text.strip()
 
+    return text.strip()
 
 def ask_llama(user_query: str) -> str:
     """Send user query to Groq (LLaMA) and return response"""
@@ -100,12 +98,10 @@ def ask_llama(user_query: str) -> str:
     )
     return response.choices[0].message.content.strip()
 
-
 def fuzzy_match(user_input, column_values):
     """Fuzzy match user input to closest column value"""
     best_match = process.extractOne(user_input, column_values)
     return best_match[0] if best_match else user_input
-
 
 def format_results(results, query_type="doctor"):
     """
@@ -120,18 +116,13 @@ def format_results(results, query_type="doctor"):
     if query_type == "doctor":
         for row in results[:3]:  # Limit to top 3
             doctor_name = row.get("doctor_name", "Unknown Doctor")
-            # Avoid double "Dr." prefix
-            if doctor_name.lower().startswith("dr."):
-                doctor_name_display = doctor_name
-            else:
-                doctor_name_display = f"Dr. {doctor_name}"
             hospital_name = row.get("hospital_name", "Unknown Hospital")
             specialty = row.get("specialty", "Unknown Specialty")
             experience = row.get("experience_years", "N/A")
             availability = row.get("availability", "Availability not listed")
 
             response.append(
-                f"🩺 {doctor_name_display} ({specialty}, {experience} years experience) "
+                f"🩺 Dr. {doctor_name} ({specialty}, {experience} years experience) "
                 f"is available at {hospital_name}. Current status: {availability}."
             )
 
@@ -151,17 +142,13 @@ def format_results(results, query_type="doctor"):
     elif query_type == "symptom":
         for row in results[:3]:
             doctor_name = row.get("doctor_name", "Unknown Doctor")
-            if doctor_name.lower().startswith("dr."):
-                doctor_name_display = doctor_name
-            else:
-                doctor_name_display = f"Dr. {doctor_name}"
             hospital_name = row.get("hospital_name", "Unknown Hospital")
             specialty = row.get("specialty", "Unknown Specialty")
             experience = row.get("experience_years", "N/A")
             availability = row.get("availability", "Availability not listed")
 
             response.append(
-                f"For your symptom, {doctor_name_display} ({specialty}, {experience} years experience) "
+                f"For your symptom, Dr. {doctor_name} ({specialty}, {experience} years experience) "
                 f"is available at {hospital_name}. Status: {availability}."
             )
 
@@ -175,44 +162,36 @@ if __name__ == "__main__":
         if user_query.lower() == "exit":
             break
 
-        clean_query = normalize_input(user_query)
         availability_filter = any(word in clean_query for word in ["available", "availability", "currently available", "free", "open", "now"])
+
+        clean_query = normalize_input(user_query)
 
         try:
             llama_output = ask_llama(clean_query)
-            print("LLaMA output:", llama_output)
-            sql_query = llama_output.strip()
-            # After getting LLaMA output in sql_query
-            sql_query = re.sub(r"specialty\s*=\s*'([^']*)'", r"specialty ILIKE '\1'", sql_query, flags=re.I)
-            sql_query = re.sub(r"symptom_keyword\s*=\s*'([^']*)'", r"symptom_keyword ILIKE '\1'", sql_query, flags=re.I)
-
+            
 
             # Use LLaMA output as plain SQL query directly
-           
-            print("Executing SQL:", sql_query)
-
-
-            # Add availability filter if not already present and user requests
+            sql_query = llama_output.strip()
             if availability_filter and "availability" not in sql_query.lower():
                 if "where" in sql_query.lower():
-                    sql_query = re.sub(r"where", "WHERE availability = TRUE AND ", sql_query, flags=re.I, count=1)
+                    sql_query = sql_query.replace("where", "WHERE availability = TRUE AND ", 1)
                 else:
-                    # If no WHERE clause, add one before LIMIT or end
-                    sql_query = re.sub(r"limit", "WHERE availability = TRUE LIMIT", sql_query, flags=re.I, count=1)
+                    sql_query = sql_query.replace("limit", "WHERE availability = TRUE LIMIT", 1)
+
 
             if not sql_query.lower().startswith("select"):
                 print("⚠️ Sorry, generated output is not a valid SELECT SQL query.")
                 continue
 
-            print("Executing SQL:", sql_query)
+           
             cur.execute(sql_query)
             rows = cur.fetchall()
-            print("Rows fetched:", rows)
+            
 
-            # Detect query type
-            if any(word in clean_query for word in ["hospital", "hospitals", "beds"]):
+            lower_query = clean_query.lower()
+            if any(word in lower_query for word in ["hospital", "hospitals", "beds"]):
                 query_type = "hospital"
-            elif any(word in clean_query for word in ["fever", "pain", "headache", "symptom", "symptoms"]):
+            elif any(word in lower_query for word in ["fever", "pain", "headache", "symptom", "symptoms"]):
                 query_type = "symptom"
             else:
                 query_type = "doctor"
@@ -224,4 +203,3 @@ if __name__ == "__main__":
 
         except Exception as e:
             print("❌ SQL execution error:", e)
-
