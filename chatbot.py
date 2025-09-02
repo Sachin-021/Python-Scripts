@@ -6,12 +6,15 @@ from dotenv import load_dotenv
 from groq import Groq
 from thefuzz import process
 import psycopg2.extras
-import re
+
+
 # -------------------- Load Environment Variables --------------------
 load_dotenv()
 
+
 # Initialize Groq client
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
 
 # Connect to PostgreSQL
 conn = psycopg2.connect(
@@ -168,6 +171,42 @@ def format_results(results, query_type="doctor"):
     return "\n\n".join(response)
 
 
+def get_chatbot_reply(user_query, filepath):
+    clean_query = normalize_input(user_query)
+    availability_filter = any(word in clean_query for word in ["available", "availability", "currently available", "free", "open", "now"])
+
+    llama_output = ask_llama(clean_query)
+    sql_query = llama_output.strip()
+
+    # Make specialty and symptom_keyword filters case-insensitive
+    sql_query = re.sub(r"specialty\s*=\s*'([^']*)'", r"specialty ILIKE '\1'", sql_query, flags=re.I)
+    sql_query = re.sub(r"symptom_keyword\s*=\s*'([^']*)'", r"symptom_keyword ILIKE '\1'", sql_query, flags=re.I)
+
+    # Add availability filter if applicable
+    if availability_filter and "availability" not in sql_query.lower():
+        if "where" in sql_query.lower():
+            sql_query = re.sub(r"where", "WHERE availability = TRUE AND ", sql_query, flags=re.I, count=1)
+        else:
+            sql_query = re.sub(r"limit", "WHERE availability = TRUE LIMIT", sql_query, flags=re.I, count=1)
+
+    if not sql_query.lower().startswith("select"):
+        return "⚠️ Sorry, generated output is not a valid SELECT SQL query."
+
+    cur.execute(sql_query)
+    rows = cur.fetchall()
+
+    # Detect query type from user input
+    if any(word in clean_query for word in ["hospital", "hospitals", "beds"]):
+        query_type = "hospital"
+    elif any(word in clean_query for word in ["fever", "pain", "headache", "symptom", "symptoms"]):
+        query_type = "symptom"
+    else:
+        query_type = "doctor"
+
+    response_text = format_results(rows, query_type=query_type)
+    return response_text
+
+
 if __name__ == "__main__":
     print("🤖 Medical Assistant Ready! Ask me about hospitals, doctors, or symptoms.")
     while True:
@@ -175,53 +214,8 @@ if __name__ == "__main__":
         if user_query.lower() == "exit":
             break
 
-        clean_query = normalize_input(user_query)
-        availability_filter = any(word in clean_query for word in ["available", "availability", "currently available", "free", "open", "now"])
-
         try:
-            llama_output = ask_llama(clean_query)
-            print("LLaMA output:", llama_output)
-            sql_query = llama_output.strip()
-            # After getting LLaMA output in sql_query
-            sql_query = re.sub(r"specialty\s*=\s*'([^']*)'", r"specialty ILIKE '\1'", sql_query, flags=re.I)
-            sql_query = re.sub(r"symptom_keyword\s*=\s*'([^']*)'", r"symptom_keyword ILIKE '\1'", sql_query, flags=re.I)
-
-
-            # Use LLaMA output as plain SQL query directly
-           
-            print("Executing SQL:", sql_query)
-
-
-            # Add availability filter if not already present and user requests
-            if availability_filter and "availability" not in sql_query.lower():
-                if "where" in sql_query.lower():
-                    sql_query = re.sub(r"where", "WHERE availability = TRUE AND ", sql_query, flags=re.I, count=1)
-                else:
-                    # If no WHERE clause, add one before LIMIT or end
-                    sql_query = re.sub(r"limit", "WHERE availability = TRUE LIMIT", sql_query, flags=re.I, count=1)
-
-            if not sql_query.lower().startswith("select"):
-                print("⚠️ Sorry, generated output is not a valid SELECT SQL query.")
-                continue
-
-            print("Executing SQL:", sql_query)
-            cur.execute(sql_query)
-            rows = cur.fetchall()
-            print("Rows fetched:", rows)
-
-            # Detect query type
-            if any(word in clean_query for word in ["hospital", "hospitals", "beds"]):
-                query_type = "hospital"
-            elif any(word in clean_query for word in ["fever", "pain", "headache", "symptom", "symptoms"]):
-                query_type = "symptom"
-            else:
-                query_type = "doctor"
-
-            response_text = format_results(rows, query_type=query_type)
-            print("Formatting response for query type:", query_type)
-
-            print("\n💡", response_text)
-
+            response = get_chatbot_reply(user_query, filepath="database_hosp_extended.csv")
+            print("\n💡 Chatbot response:\n", response)
         except Exception as e:
-            print("❌ SQL execution error:", e)
-
+            print("❌ Error:", e)
