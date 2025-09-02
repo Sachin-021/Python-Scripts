@@ -49,7 +49,29 @@ hospital_list = [
     "Aravind Eye Hospital", "Sugam Hospital", "Vijaya Hospital", "Medwin Specialty Hospital",
     "Green Leaf Hospital", "Lotus Heart Center", "Sundaram Multispecialty",
     "Royal Care Super Specialty", "Trustwell Hospital", "New Life Hospital",
-    "Wellbeing Hospital", "Hope Medical Center", "Bright Health Hospital"
+    "Wellbeing Hospital", "Hope Medical Center", "Bright Health Hospital",
+    "Apollo Specialty Hospital", "Fortis Health Center", "Sri Krishna Medical College",
+    "LifeLine Multispecialty", "Global Health City", "Velan Eye Hospital",
+    "Shanthi Children’s Hospital", "Bharathi Ortho Center", "Aruna Women’s Clinic",
+    "Coimbatore Neuro Care", "Sri Venkateswara Institute of Medical Sciences",
+    "Nirmala General Hospital", "Metro Heart Institute", "Santhosh Medical College",
+    "Lotus Women’s Hospital", "Kovai Heart Institute", "Green Valley Health Center",
+    "Hope Specialty Hospital", "Trinity Care Hospital", "Elite Health Care",
+    "Rainbow Children’s Hospital", "MediLife Multispecialty", "Vision Plus Eye Hospital",
+    "Shree Balaji Medical Institute", "WellCare Hospital", "Sunshine Neuro Center",
+    "Grace Medical College", "Prime Care Hospital", "Janani Women & Child Hospital",
+    "Sundar Eye Institute", "Harmony Health Center", "Nova Medical College",
+    "Sri Meenakshi Health Center", "Aster Specialty Hospital", "Sankara Neuro Institute",
+    "Royal Heart Care", "LifeSpring Hospital", "Heritage Multispecialty",
+    "Unity Medical Institute", "Sri Sai Health Center", "Healing Touch Hospital",
+    "Sacred Heart Medical College", "Bluebell Hospital", "Skyline Health Institute",
+    "Athena Women’s Hospital", "Wellbeing Care Hospital", "MediTrust Hospital",
+    "Sri Ramana Neuro Hospital", "Galaxy Specialty Clinic", "Om Shakthi Medical Center",
+    "Starline Children’s Hospital", "Brahma Ortho Institute", "Zenith Health College",
+    "Veda Women’s Hospital", "Sapphire Eye Hospital", "Amrita Specialty Hospital",
+    "Phoenix Heart Institute", "Arcadia Health Center", "MedStar Multispecialty",
+    "Vital Care Hospital", "Cosmos Medical Institute", "Emerald Eye Clinic",
+    "Sterling Neuro Care", "Cura Medical College"
 ]
 
 # Optional: Location map if you want to associate hospitals with areas
@@ -117,6 +139,10 @@ Rules:
 - If you don't know a value, use null.
 - Do not explain or add alternatives in the JSON.
 - Do not invent doctor names.
+- If the doctor is asked dont give random values,analyse and say
+- If hospital is asked do the same as for doctor
+- Do not share any sensitive reply and be strict towards clarity 
+- Avoid if they ask something not regarding needs
 
 Examples:
 {examples}
