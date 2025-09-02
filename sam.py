@@ -1,228 +1,409 @@
-import os
-import psycopg2
-from groq import Groq
-from dotenv import load_dotenv
+'''import os
+import csv
+import re
 import json
-from rapidfuzz import process
+from dotenv import load_dotenv
+from groq import Groq
+from thefuzz import process
 
-# -------------------- Load environment variables --------------------
+# -------------------- Load environment and initialize Groq client --------------------
 load_dotenv()
+client = Groq(api_key=os.getenv("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"))
 
-# -------------------- Database Connection --------------------
-try:
-    conn = psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT")
-    )
-    cur = conn.cursor()
-except Exception as e:
-    print("Database connection error:", e)
-    exit()
-
-# -------------------- Groq Client --------------------
-client = Groq(api_key=os.getenv("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"))  # keep in .env
-
-# -------------------- Utility: Fuzzy Matching --------------------
-def fuzzy_match(input_str, choices, threshold=80):
-    """Return best fuzzy match from choices if score >= threshold."""
-    if not input_str or not choices:
-        return None
-    match = process.extractOne(input_str, choices)
-    if match and match[1] >= threshold:
-        return match[0]
-    return None
-
-# -------------------- User Input (Runtime) --------------------
-user_input = input("Enter your query: ")
-
-# -------------------- Step 1: Extract Metadata --------------------
-prompt_metadata = f"""
-You are a medical query parser. 
-Your task is to extract structured metadata from noisy or imperfect user queries.
-
-User query: "{user_input}"
-
-Return ONLY a valid JSON object with EXACTLY these fields:
-- intent: "find_doctor", "check_beds", "greet", "other"
-- symptom: (health issue if any, else "")
-- specialty: (medical specialty if clear or can be inferred, else "")
-- hospital_name: (hospital requested if any, tolerate spelling mistakes, else "")
-- doctor_name: (doctor requested if any, tolerate spelling mistakes, else "")
-
-Rules:
-1. Always output valid JSON (no extra text).
-2. Normalize common typos (e.g., "Apolo" → "Apollo").
-3. Infer specialty from symptom if possible (e.g., "bone pain" → "Orthopedics").
-4. If hospital or doctor not clearly mentioned, leave as "".
-5. If the query is just a greeting, set intent = "greet".
-
-Example:
-{{
-  "intent": "find_doctor",
-  "symptom": "bone pain",
-  "specialty": "Orthopedics",
-  "hospital_name": "Coimbatore Medical Center",
-  "doctor_name": ""
-}}
-"""
-
-try:
-    response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": prompt_metadata}],
-        temperature=0.1
-    )
-    metadata_str = response.choices[0].message.content.strip()
-    metadata = json.loads(metadata_str)
-except Exception as e:
-    print("Error extracting metadata:", e)
-    metadata = {}
-
-user_symptom = metadata.get("symptom", "").lower()
-user_specialty = metadata.get("specialty", "").title()
-user_hospital = metadata.get("hospital_name", None)
-user_doctor = metadata.get("doctor_name", None)
-
-# -------------------- Step 2: Symptom → Specialty Mapping --------------------
+# -------------------- Specialty Map --------------------
 specialty_map = {
     "chest pain": "Cardiology",
     "heart problem": "Cardiology",
+    "cardiology": "Cardiology",
     "fracture": "Orthopedics",
     "bone pain": "Orthopedics",
+    "orthopedics": "Orthopedics",
     "eye problem": "Ophthalmology",
     "vision issue": "Ophthalmology",
+    "ophthalmology": "Ophthalmology",
     "stomach pain": "Gastroenterology",
+    "gastro": "Gastroenterology",
+    "gastroenterology": "Gastroenterology",
     "skin rash": "Dermatology",
+    "dermatology": "Dermatology",
     "pregnancy": "Gynecology",
-    "fever": "General Medicine"
+    "gynecology": "Gynecology",
+    "fever": "General Medicine",
+    "general medicine": "General Medicine",
+    "nervous problem": "Neurology",
+    "neurology": "Neurology",
+    "headache": "Neurology",
+    "seizure": "Neurology",
+    "memory loss": "Neurology",
+    "oncology": "Oncology",
+    "cancer": "Oncology",
+    "tumor": "Oncology",
+    "chemotherapy": "Oncology",
+    "radiation": "Oncology"
 }
-specialty = user_specialty or specialty_map.get(user_symptom, None)
 
-# -------------------- Step 3: Apply Fuzzy Matching --------------------
-# Hospitals list
-cur.execute("SELECT hospital_name FROM hospitals;")
-all_hospitals = [r[0] for r in cur.fetchall()]
-user_hospital = fuzzy_match(user_hospital, all_hospitals) or user_hospital
+# -------------------- Hospital list --------------------
+hospital_list = [
+    "Coimbatore Medical Center", "Kovai Medical College Hospital", "KG Hospital",
+    "PSG Hospitals", "Sri Ramakrishna Hospital", "Ganga Hospital", "Gem Hospital",
+    "Aravind Eye Hospital", "Sugam Hospital", "Vijaya Hospital", "Medwin Specialty Hospital",
+    "Green Leaf Hospital", "Lotus Heart Center", "Sundaram Multispecialty",
+    "Royal Care Super Specialty", "Trustwell Hospital", "New Life Hospital",
+    "Wellbeing Hospital", "Hope Medical Center", "Bright Health Hospital"
+]
 
-# Specialties list
-cur.execute("SELECT DISTINCT specialty FROM doctors;")
-all_specialties = [r[0] for r in cur.fetchall()]
-specialty = fuzzy_match(specialty, all_specialties) or specialty
+# Optional: Location map if you want to associate hospitals with areas
+location_map = {
+    "Coimbatore": ["Coimbatore Medical Center", "Kovai Medical College Hospital", "PSG Hospitals", "Sri Ramakrishna Hospital"],
+    "Erode": ["KG Hospital", "Sugam Hospital", "Gem Hospital"],
+    "Madurai": ["Vijaya Hospital", "Aravind Eye Hospital"],
+    # add more locations as needed
+}
 
-# Doctors list (optional fuzzy match if user specifies)
-if user_doctor:
-    cur.execute("SELECT doctor_name FROM doctors;")
-    all_doctors = [r[0] for r in cur.fetchall()]
-    user_doctor = fuzzy_match(user_doctor, all_doctors) or user_doctor
+# -------------------- Utility functions --------------------
+def normalize(text):
+    if not text:
+        return ""
+    ignore_words = ["hospital", "center", "clinic", "medical", "super specialty"]
+    text = text.lower()
+    for w in ignore_words:
+        text = text.replace(w, "")
+    text = re.sub(r'\s+', '', text)
+    return text
 
-# -------------------- Step 4: Query Database --------------------
-def get_doctors(symptom=None, specialty=None, hospital=None, location="Coimbatore"):
-    base_query = """
-    SELECT h.hospital_name, h.area, d.doctor_name, d.specialty, d.experience_years, h.available_beds
-    FROM hospitals h
-    JOIN doctors d ON h.hospital_id = d.hospital_id
-    WHERE d.availability = TRUE
-      AND h.available_beds > 0
-    """
-    params = []
+def fuzzy_extract_best(query, choices, cutoff=70):
+    if not query or not choices:
+        return None
+    match, score = process.extractOne(query, choices)
+    if score >= cutoff:
+        return match
+    return None
 
-    # Location filter
-    if location:
-        base_query += " AND h.location = %s"
-        params.append(location)
+def extract_json(text):
+    try:
+        matches = re.findall(r"\{.*?\}", text, re.DOTALL)
+        for match in matches:
+            try:
+                return json.loads(match)
+            except:
+                continue
+    except:
+        return {}
+    return {}
 
-    # Specialty filter
-    if specialty:
-        base_query += " AND d.specialty = %s"
-        params.append(specialty)
+# -------------------- LLaMA entity extraction --------------------
+examples = """
+:User    I have memory loss issues, can I get a doctor at Coimbatore Medical Center?
+Assistant: {"problem": "memory loss", "doctor": null, "hospital": "Coimbatore Medical Center", "location": null}
 
-    # Hospital filter
-    if hospital:
-        base_query += " AND LOWER(h.hospital_name) = LOWER(%s)"
-        params.append(hospital)
+:User    I have a skin rash, is there a Dermatology doctor at PSG Hospitals?
+Assistant: {"problem": "skin rash", "doctor": null, "hospital": "PSG Hospitals", "location": null}
 
-    # Doctor filter
-    if user_doctor:
-        base_query += " AND LOWER(d.doctor_name) = LOWER(%s)"
-        params.append(user_doctor)
+:User    Is Dr. Arjun available at Ganga Hospital for Orthopedics?
+Assistant: {"problem": null, "doctor": "Dr. Arjun", "hospital": "Ganga Hospital", "location": null}
 
-    # Ordering
-    base_query += """
-    ORDER BY 
-        CASE WHEN %s IS NOT NULL AND LOWER(h.hospital_name) = LOWER(%s) THEN 0 ELSE 1 END,
-        d.experience_years DESC,
-        h.available_beds DESC
-    LIMIT 5;
-    """
-    params.extend([hospital, hospital])
-
-    cur.execute(base_query, tuple(params))
-    results = [
-        {
-            "hospital_name": r[0],
-            "area": r[1],
-            "doctor_name": r[2],
-            "specialty": r[3],
-            "experience": r[4],
-            "available_beds": r[5]
-        }
-        for r in cur.fetchall()
-    ]
-    return results
-
-results = get_doctors(symptom=user_symptom, specialty=specialty, hospital=user_hospital)
-
-# -------------------- Step 5: Format Doctor Info --------------------
-def format_doctor(doctor):
-    return (f"Dr. {doctor['doctor_name']} ({doctor['specialty']}, {doctor['experience']} yrs) "
-            f"at {doctor['hospital_name']} ({doctor['area']}) — Beds available: {doctor['available_beds']}")
-
-if results:
-    primary_doctor = results[0]
-    other_doctors = results[1:]
-else:
-    primary_doctor = None
-    other_doctors = []
-
-# -------------------- Step 6: Generate Final Chatbot Reply --------------------
-friendly_prompt = f"""
-You are a hospital recommendation assistant.
-
-User query: "{user_input}"
-
-Doctors retrieved from database:
-Primary Doctor:
-{format_doctor(primary_doctor) if primary_doctor else "None"}
-Alternative Options:
-{chr(10).join([format_doctor(d) for d in other_doctors]) or "None"}
-
-Instructions:
-1. If a specific hospital was requested, prioritize recommending from that hospital first.
-2. If no doctor available in that hospital, politely say so and suggest alternatives nearby.
-3. Always mention: Doctor Name, Specialty, Experience (yrs), Hospital, Area, Available Beds.
-4. Keep the tone: friendly, professional, unbiased.
-5. Structure output as:
-
-**Recommended Doctor**
-- (doctor details)
-
-**Alternative Options**
-- (doctor details)
+:User    I have cancer what hospital or doctor should I visit?
+Assistant: {"problem": "cancer", "doctor": null, "hospital": null, "location": null}
 """
 
-try:
+def extract_entities(user_query):
+    prompt = f"""
+You are a medical chatbot. Extract structured entities from the user query.
+
+Return ONLY JSON with keys: problem, doctor, hospital, location.
+
+Rules:
+- Return valid JSON only.
+- If you don't know a value, use null.
+- Do not explain or add alternatives in the JSON.
+- Do not invent doctor names.
+
+Examples:
+{examples}
+
+Now extract entities from:
+"{user_query}"
+"""
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        content = response.choices[0].message.content.strip()
+        return extract_json(content)
+    except:
+        return None
+
+# -------------------- Symptom and hospital extraction --------------------
+def extract_symptom_and_hospital(problem, hospital):
+    symptom = fuzzy_extract_best(problem.lower(), list(specialty_map.keys())) if problem else None
+    true_hospital = None
+    if hospital:
+        hospital_norm = normalize(hospital)
+        hospital_norm_list = [normalize(h) for h in hospital_list]
+        hospital_match_norm = fuzzy_extract_best(hospital_norm, hospital_norm_list)
+        if hospital_match_norm:
+            for h in hospital_list:
+                if normalize(h) == hospital_match_norm:
+                    true_hospital = h
+                    break
+    return symptom, true_hospital
+
+# -------------------- Find doctors from CSV --------------------
+def find_doctors(filepath, specialty, hospital, max_alts=2):
+    doctors_primary, doctors_alt = [], []
+    seen_hospitals = set()
+    hospital_norm = normalize(hospital) if hospital else None
+    specialty_norm = specialty.lower() if specialty else None
+    with open(filepath, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get('availability', '').strip().lower() != "true":
+                continue
+            row_hospital_norm = normalize(row.get('hospital_name', ''))
+            row_specialty_norm = row.get('specialty', '').lower()
+            if hospital_norm and row_hospital_norm == hospital_norm and row_specialty_norm == specialty_norm:
+                doctors_primary.append(row)
+            elif row_specialty_norm == specialty_norm:
+                key = (row.get('hospital_name', ''), row.get('area', ''))
+                if key not in seen_hospitals and (not hospital_norm or row_hospital_norm != hospital_norm):
+                    doctors_alt.append(row)
+                    seen_hospitals.add(key)
+                    if len(doctors_alt) == max_alts:
+                        break
+    return doctors_primary, doctors_alt
+
+def format_doc(row):
+    return (f"Doctor: {row.get('doctor_name', 'N/A')} | Specialty: {row.get('specialty', 'N/A')} | "
+            f"Experience: {row.get('experience_years', 'N/A')} yrs | Hospital: {row.get('hospital_name', 'N/A')} ({row.get('area', 'N/A')}) | Beds: {row.get('available_beds', 'N/A')}")
+
+# -------------------- Main chatbot reply --------------------
+def get_chatbot_reply(user_text, filepath="database_hosp_extended.csv"):
+    entities = extract_entities(user_text)
+    if not entities:
+        return "Sorry, I couldn't understand your query. Please try rephrasing."
+
+    problem, doctor, hospital, location = entities.get("problem"), entities.get("doctor"), entities.get("hospital"), entities.get("location")
+    symptom, true_hospital = extract_symptom_and_hospital(problem, hospital)
+    if not symptom:
+        return "Sorry, I couldn't identify your health issue. Please rephrase or specify your symptom clearly."
+    specialty = specialty_map.get(symptom)
+    doctors_primary, doctors_alt = find_doctors(filepath, specialty, true_hospital)
+    hospital_display = true_hospital if true_hospital else "Not specified"
+
+    if doctors_primary:
+        doc = doctors_primary[0]
+        short_reply = f"{specialty} → {doc.get('doctor_name')} ({doc.get('experience_years')} yrs, {doc.get('area')}, {doc.get('hospital_name')})"
+    elif doctors_alt:
+        doc = doctors_alt[0]
+        short_reply = f"No. Alternatives → {doc.get('doctor_name')} ({doc.get('specialty')}, {doc.get('hospital_name')})"
+    else:
+        short_reply = "No doctors found for your query."
+
+    detailed_lines = []
+    if doctors_primary:
+        detailed_lines.append("Doctor(s) available at requested hospital:")
+        for doc in doctors_primary:
+            detailed_lines.append(format_doc(doc))
+    elif doctors_alt:
+        detailed_lines.append("Alternative hospitals with available doctors for the same specialty:")
+        for doc in doctors_alt:
+            detailed_lines.append(format_doc(doc))
+
+    reply = short_reply
+    if detailed_lines:
+        reply += "\n\n" + "\n".join(detailed_lines)
+
+    return reply
+
+# -------------------- Run chatbot --------------------
+if __name__ == "__main__":
+    print("Welcome to the Medical Chatbot! Type 'exit' or 'quit' to stop.")
+    while True:
+        user_input = input("Ask your health question: ").strip()
+        if user_input.lower() in ["exit", "quit"]:
+            print("Goodbye!")
+            break
+        response = get_chatbot_reply(user_input, filepath="database_hosp_extended.csv")
+        print(response)'''
+
+import os
+import csv
+import re
+from dotenv import load_dotenv
+from groq import Groq
+from thefuzz import process
+
+# Load environment and initialize Groq client
+load_dotenv()
+client = Groq(api_key=os.getenv("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"))
+
+# Symptom to Specialty Map (expand with synonyms etc.)
+specialty_map = {
+    "chest pain": "Cardiology",
+    "heart problem": "Cardiology",
+    "cardiology": "Cardiology",
+
+    "fracture": "Orthopedics",
+    "bone pain": "Orthopedics",
+    "orthopedics": "Orthopedics",
+
+    "eye problem": "Ophthalmology",
+    "vision issue": "Ophthalmology",
+    "ophthalmology": "Ophthalmology",
+
+    "stomach pain": "Gastroenterology",
+    "gastro": "Gastroenterology",
+    "gastroenterology": "Gastroenterology",
+
+    "skin rash": "Dermatology",
+    "dermatology": "Dermatology",
+
+    "pregnancy": "Gynecology",
+    "gynecology": "Gynecology",
+
+    "fever": "General Medicine",
+    "general medicine": "General Medicine",
+
+    "nervous problem": "Neurology",
+    "neurology": "Neurology",
+    "headache": "Neurology",
+    "seizure": "Neurology",
+    "memory loss": "Neurology",
+
+    # ✅ Add this block for Oncology
+    "oncology": "Oncology",
+    "cancer": "Oncology",
+    "tumor": "Oncology",
+    "chemotherapy": "Oncology",
+    "radiation": "Oncology"
+}
+
+
+# Hospital list from CSV -- make sure it's complete and normalized
+hospital_list = [
+    "Coimbatore Medical Center",
+    "Kovai Medical College Hospital",
+    "KG Hospital",
+    "PSG Hospitals",
+    "Sri Ramakrishna Hospital",
+    "Ganga Hospital",
+    "Gem Hospital", 
+    "Aravind Eye Hospital",
+    "Sugam Hospital",
+    "Vijaya Hospital",
+    "Medwin Specialty Hospital",
+    "Green Leaf Hospital",
+    "Lotus Heart Center",
+    "Sundaram Multispecialty",
+    "Royal Care Super Specialty",
+    "Trustwell Hospital",
+    "New Life Hospital",
+    "Wellbeing Hospital",
+    "Hope Medical Center",
+    "Bright Health Hospital"
+]
+
+def normalize(text):
+    """Normalize strings for robust comparison."""
+    ignore_words = ["hospital", "center", "clinic", "medical", "super specialty"]
+    text = text.lower()
+    for w in ignore_words:
+        text = text.replace(w, "")
+    return re.sub(r'\s+', '', text)
+
+def fuzzy_extract_best(query, choices, cutoff=70):
+    """Return best fuzzy match above cutoff or None."""
+    match, score = process.extractOne(query, choices)
+    if score >= cutoff:
+        return match
+    return None
+
+def extract_symptom_and_hospital(user_text):
+    user_text_norm = user_text.lower()
+    # Extract symptom using fuzzy matching
+    symptom = fuzzy_extract_best(user_text_norm, list(specialty_map.keys()))
+    # Extract hospital using fuzzy matching on normalized names
+    hospital_norm_list = [h.lower() for h in hospital_list]
+    hospital_match = fuzzy_extract_best(user_text_norm, hospital_norm_list)
+    true_hospital = None
+    if hospital_match:
+        # Find original casing hospital name
+        for h in hospital_list:
+            if h.lower() == hospital_match:
+                true_hospital = h
+                break
+    return symptom, true_hospital
+
+def find_doctors(filepath, specialty, hospital, max_alts=2):
+    doctors_primary = []
+    doctors_alt = []
+    seen_hospitals = set()
+    with open(filepath, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row['availability'].strip().lower() != "true":
+                continue
+            # Normalize for matching 
+            row_hospital_norm = normalize(row['hospital_name'])
+            hospital_norm = normalize(hospital) if hospital else None
+            row_specialty_norm = row['specialty'].lower()
+            specialty_norm = specialty.lower()
+
+            # Primary hospital and specialty match
+            if hospital_norm and row_hospital_norm == hospital_norm and row_specialty_norm == specialty_norm:
+                doctors_primary.append(row)
+            # Alternatives: same specialty, different hospital
+            elif row_specialty_norm == specialty_norm:
+                key = (row['hospital_name'], row['area'])
+                if key not in seen_hospitals and (not hospital_norm or row_hospital_norm != hospital_norm):
+                    doctors_alt.append(row)
+                    seen_hospitals.add(key)
+                    if len(doctors_alt) == max_alts:
+                        break
+    return doctors_primary, doctors_alt
+
+def format_doc(row):
+    return (f"Doctor: {row['doctor_name']} | Specialty: {row['specialty']} | "
+            f"Experience: {row['experience_years']} yrs | Hospital: {row['hospital_name']} ({row['area']}) | Beds: {row['available_beds']}")
+
+def get_chatbot_reply(user_text, filepath="database_hosp.csv"):
+    symptom, hospital = extract_symptom_and_hospital(user_text)
+    if not symptom:
+        return "Sorry, I couldn't identify your health issue. Please rephrase or specify your symptom clearly."
+    specialty = specialty_map.get(symptom, None)
+    if not specialty:
+        return "Sorry, I couldn't match your symptom to a medical specialty. Please rephrase."
+    doctors_primary, doctors_alt = find_doctors(filepath, specialty, hospital)
+    hospital_display = hospital if hospital else "Not specified"
+    strict_prompt = f"""
+You are a helpful medical chatbot. ONLY use the data provided; do NOT invent or embellish details.
+
+User request: "{user_text}"
+Symptom: {symptom}
+Hospital: {hospital_display}
+
+Doctor(s) at requested hospital:
+{format_doc(doctors_primary[0]) if doctors_primary else "None available."}
+
+Alternative hospitals for the same specialty (up to 2):
+{chr(10).join([format_doc(doc) for doc in doctors_alt]) if doctors_alt else "None available."}
+
+Instructions:
+- Clearly recommend available doctors from the requested hospital (if any).
+- If none are found, politely explain so and offer up to 2 alternative hospital/doctor specialists.
+- Be friendly, clear, and actionable.
+- Never add extra information not present above.
+    """
     reply = client.chat.completions.create(
         model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": friendly_prompt}],
-        temperature=0.4
+        messages=[{"role": "user", "content": strict_prompt}],
+        temperature=0.2
     )
-    print("\nChatbot Reply:\n", reply.choices[0].message.content)
-except Exception as e:
-    print("Error generating chatbot reply:", e)
+    return reply.choices[0].message.content
 
-# -------------------- Cleanup --------------------
-cur.close()
-conn.close()
+# --------- DEPLOYMENT STARTS HERE ---------
+if __name__ == "__main__":
+    user_input = input("Ask your health question: ")
+    print(get_chatbot_reply(user_input, filepath="C:\\Users\\Sachi\\Downloads\\database_hosp.csv"))
+#chatbot.py

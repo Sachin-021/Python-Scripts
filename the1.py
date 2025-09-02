@@ -1,189 +1,108 @@
-import os
-import re
 import csv
-from dotenv import load_dotenv
-from groq import Groq
-from fuzzywuzzy import process
+import random
 
-# -------------------- Load environment variables --------------------
-load_dotenv()
-client = Groq(api_key=os.getenv("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"))  # 👈 store your API key in .env
+# Existing CSV file
+input_file = "database_hosp.csv"
+output_file = "database_hosp_extended.csv"
 
-# -------------------- Symptom → Specialty Mapping --------------------
-specialty_map = {
-    "chest pain": "Cardiology",
-    "heart problem": "Cardiology",
-    "cardiology": "Cardiology",
-
-    "fracture": "Orthopedics",
-    "bone pain": "Orthopedics",
-    "orthopedics": "Orthopedics",
-
-    "eye problem": "Ophthalmology",
-    "vision issue": "Ophthalmology",
-    "ophthalmology": "Ophthalmology",
-
-    "stomach pain": "Gastroenterology",
-    "gastro": "Gastroenterology",
-    "gastroenterology": "Gastroenterology",
-
-    "skin rash": "Dermatology",
-    "dermatology": "Dermatology",
-
-    "pregnancy": "Gynecology",
-    "gynecology": "Gynecology",
-
-    "fever": "General Medicine",
-    "general medicine": "General Medicine",
-
-    "nervous problem": "Neurology",
-    "neurology": "Neurology",
-    "headache": "Neurology",
-    "seizure": "Neurology",
-    "memory loss": "Neurology",
-
-    # ✅ Oncology cases
-    "oncology": "Oncology",
-    "cancer": "Oncology",
-    "tumor": "Oncology",
-    "chemotherapy": "Oncology",
-    "radiation": "Oncology"
-}
-
-# -------------------- Hospital List --------------------
-hospital_list = [
-    "Coimbatore Medical Center",
-    "Kovai Medical College Hospital",
-    "KG Hospital",
-    "PSG Hospitals",
-    "Sri Ramakrishna Hospital",
-    "Ganga Hospital",
-    "Gem Hospital", 
-    "Aravind Eye Hospital",
-    "Sugam Hospital",
-    "Vijaya Hospital",
-    "Medwin Specialty Hospital",
-    "Green Leaf Hospital",
-    "Lotus Heart Center",
-    "Sundaram Multispecialty",
-    "Royal Care Super Specialty",
-    "Trustwell Hospital",
-    "New Life Hospital",
-    "Wellbeing Hospital",
-    "Hope Medical Center",
-    "Bright Health Hospital"
+# New hospital locations in Coimbatore
+new_locations = [
+    "Gandhipuram", "Town Hall", "Singanallur", "Avinashi Road", "Ukkadam", 
+    "Saravanampatti", "Kalapatti", "Thudiyalur", "Ganapathy", "Selvapuram",
+    "Kuniyamuthur", "Podanur", "Irugur", "Perur", "Chinniampalayam", 
+    "Sulur", "Marudamalai", "Kovaipudur"
 ]
 
-# -------------------- Helpers --------------------
-def normalize(text):
-    """Normalize strings for robust hospital matching."""
-    ignore_words = ["hospital", "center", "clinic", "medical", "super specialty"]
-    text = text.lower()
-    for w in ignore_words:
-        text = text.replace(w, "")
-    return re.sub(r'\s+', '', text)
+# Specialties to rotate
+specialties = [
+    "Cardiology", "Oncology", "Neurology", "Orthopedics", "Pediatrics",
+    "Dermatology", "Gynecology", "General Medicine", "Gastroenterology",
+    "Ophthalmology", "General Surgery"
+]
 
-def fuzzy_extract_best(query, choices, cutoff=70):
-    """Return best fuzzy match above cutoff or None."""
-    match, score = process.extractOne(query, choices)
-    if score >= cutoff:
-        return match
-    return None
+# Doctor name components
+first_names = ["Arun", "Priya", "Vijay", "Meena", "Suresh", "Divya", "Karthik", "Anitha", "Rajiv", "Sneha", 
+               "Naveen", "Deepa", "Rahul", "Kavitha", "Balaji", "Shalini", "Harini", "Varun", "Rohit", "Ashwin"]
+last_names = ["Rao", "Iyer", "Menon", "Krishnan", "Sharma", "Pillai", "Kumar", "Reddy", "Prasad", "Nair"]
 
-def extract_symptom_and_hospital(user_text):
-    """Extract symptom and hospital from user query."""
-    user_text_norm = user_text.lower()
+# Unique hospital names (extendable)
+hospital_name_pool = [
+    "Apollo Specialty Hospital", "Fortis Health Center", "Sri Krishna Medical College",
+    "LifeLine Multispecialty", "Global Health City", "Velan Eye Hospital",
+    "Shanthi Children’s Hospital", "Bharathi Ortho Center", "Aruna Women’s Clinic",
+    "Coimbatore Neuro Care", "Sri Venkateswara Institute of Medical Sciences",
+    "Nirmala General Hospital", "Metro Heart Institute", "Santhosh Medical College",
+    "Lotus Women’s Hospital", "Kovai Heart Institute", "Green Valley Health Center",
+    "Hope Specialty Hospital", "Trinity Care Hospital", "Elite Health Care",
+    "Rainbow Children’s Hospital", "MediLife Multispecialty", "Vision Plus Eye Hospital",
+    "Shree Balaji Medical Institute", "WellCare Hospital", "Sunshine Neuro Center",
+    "Grace Medical College", "Prime Care Hospital", "Janani Women & Child Hospital",
+    "Sundar Eye Institute", "Harmony Health Center", "Nova Medical College",
+    "Sri Meenakshi Health Center", "Aster Specialty Hospital", "Sankara Neuro Institute",
+    "Royal Heart Care", "LifeSpring Hospital", "Heritage Multispecialty",
+    "Unity Medical Institute", "Sri Sai Health Center", "Healing Touch Hospital",
+    "Sacred Heart Medical College", "Bluebell Hospital", "Skyline Health Institute",
+    "Athena Women’s Hospital", "Wellbeing Care Hospital", "MediTrust Hospital",
+    "Sri Ramana Neuro Hospital", "Galaxy Specialty Clinic", "Om Shakthi Medical Center",
+    "Starline Children’s Hospital", "Brahma Ortho Institute", "Zenith Health College",
+    "Veda Women’s Hospital", "Sapphire Eye Hospital", "Amrita Specialty Hospital",
+    "Phoenix Heart Institute", "Arcadia Health Center", "MedStar Multispecialty",
+    "Vital Care Hospital", "Cosmos Medical Institute", "Emerald Eye Clinic",
+    "Sterling Neuro Care", "Cura Medical College", "Radiant Health Care",
+    "Pranav Children’s Hospital", "Sri Ramana Eye Institute", "Omega Specialty Hospital",
+    "Clover Medical Institute", "Vista Women’s Hospital", "Pulse Heart Care",
+    "Magnus General Hospital", "Beacon Health College", "Olive Health Center",
+    "Infinity Medical College", "Medicover Specialty Hospital", "Summit Neuro Institute",
+    "Serene Women’s Hospital", "Zen Care Hospital", "Divine Health Center",
+    "Grace Heart Institute", "Florence Eye Hospital", "Lifecare Children’s Hospital"
+]
 
-    # Symptom
-    symptom = fuzzy_extract_best(user_text_norm, list(specialty_map.keys()))
+# Avoid duplicates with existing hospitals
+existing_hospitals = set()
+with open(input_file, "r", encoding="utf-8") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        existing_hospitals.add(row["hospital_name"])
 
-    # Hospital
-    hospital_norm_list = [h.lower() for h in hospital_list]
-    hospital_match = fuzzy_extract_best(user_text_norm, hospital_norm_list)
-    true_hospital = None
-    if hospital_match:
-        for h in hospital_list:
-            if h.lower() == hospital_match:
-                true_hospital = h
-                break
+hospital_name_pool = [h for h in hospital_name_pool if h not in existing_hospitals]
 
-    return symptom, true_hospital
+# Function to generate a new doctor row
+def generate_doctor(hospital, area, specialty):
+    doctor_name = f"Dr. {random.choice(first_names)} {random.choice(last_names)}"
+    experience = random.randint(5, 25)
+    availability = random.choice(["True", "False"])
+    beds = random.randint(80, 400)
+    return {
+        "hospital_name": hospital,
+        "area": area,
+        "doctor_name": doctor_name,
+        "specialty": specialty,
+        "experience_years": experience,
+        "availability": availability,
+        "available_beds": beds
+    }
 
-def find_doctors(filepath, specialty, hospital, max_alts=2):
-    """Return doctors from primary hospital and alternative hospitals."""
-    doctors_primary, doctors_alt = [], []
-    seen_hospitals = set()
+# Generate dataset
+rows = []
+doctors_per_hospital = 5
 
-    with open(filepath, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row['availability'].strip().lower() != "true":
-                continue
+for hospital_name in hospital_name_pool:
+    area = random.choice(new_locations)
+    used_specialties = random.sample(specialties, doctors_per_hospital)
+    for spec in used_specialties:
+        rows.append(generate_doctor(hospital_name, area, spec))
 
-            row_hospital_norm = normalize(row['hospital_name'])
-            hospital_norm = normalize(hospital) if hospital else None
-            row_specialty_norm = row['specialty'].lower()
-            specialty_norm = specialty.lower()
+# Save extended dataset
+with open(output_file, "w", newline="", encoding="utf-8") as f:
+    fieldnames = ["hospital_name","area","doctor_name","specialty","experience_years","availability","available_beds"]
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer.writeheader()
+    # Append existing dataset
+    with open(input_file, "r", encoding="utf-8") as fin:
+        for line in fin.readlines()[1:]:
+            f.write(line)
+    # Append new dataset
+    for row in rows:
+        writer.writerow(row)
 
-            # ✅ Match hospital + specialty
-            if hospital_norm and row_hospital_norm == hospital_norm and row_specialty_norm == specialty_norm:
-                doctors_primary.append(row)
-
-            # ✅ Alternative hospitals (same specialty, different hospital)
-            elif row_specialty_norm == specialty_norm:
-                key = (row['hospital_name'], row['area'])
-                if key not in seen_hospitals and (not hospital_norm or row_hospital_norm != hospital_norm):
-                    doctors_alt.append(row)
-                    seen_hospitals.add(key)
-                    if len(doctors_alt) == max_alts:
-                        break
-    return doctors_primary, doctors_alt
-
-def format_doc(row):
-    """Format doctor details for display."""
-    return (f"Doctor: {row['doctor_name']} | Specialty: {row['specialty']} | "
-            f"Experience: {row['experience_years']} yrs | Hospital: {row['hospital_name']} ({row['area']}) | Beds: {row['available_beds']}")
-
-def get_chatbot_reply(user_text, filepath="C:\\Users\\Sachi\\Downloads\\database_hosp.csv"):
-    """Main chatbot function."""
-    symptom, hospital = extract_symptom_and_hospital(user_text)
-
-    if not symptom:
-        return "❌ Sorry, I couldn't identify your health issue. Please rephrase or specify your symptom clearly."
-
-    specialty = specialty_map.get(symptom, None)
-    if not specialty:
-        return "❌ Sorry, I couldn't match your symptom to a medical specialty."
-
-    doctors_primary, doctors_alt = find_doctors(filepath, specialty, hospital)
-    hospital_display = hospital if hospital else "Not specified"
-
-    strict_prompt = f"""
-You are a helpful medical chatbot. ONLY use the data provided; do NOT invent details.
-
-User request: "{user_text}"
-Symptom: {symptom}
-Hospital: {hospital_display}
-
-Doctor(s) at requested hospital:
-{format_doc(doctors_primary[0]) if doctors_primary else "None available."}
-
-Alternative hospitals (same specialty, up to 2):
-{chr(10).join([format_doc(doc) for doc in doctors_alt]) if doctors_alt else "None available."}
-
-Instructions:
-- Clearly recommend available doctors from the requested hospital (if any).
-- If none, explain politely and offer up to 2 alternative hospitals/doctors.
-- Be friendly, clear, and actionable.
-"""
-    reply = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[{"role": "user", "content": strict_prompt}],
-        temperature=0.2
-    )
-    return reply.choices[0].message.content
-
-# -------------------- Run CLI --------------------
-if __name__ == "__main__":
-    user_input = input("Ask your health question: ")
-    print(get_chatbot_reply(user_input))
+print(f"Extended dataset saved as {output_file} with total {len(rows)} rows (existing + new).")
