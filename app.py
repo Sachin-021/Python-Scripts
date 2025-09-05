@@ -66,7 +66,7 @@ with st.form(key='chat_form', clear_on_submit=True):
 if submit_button:
     if user_input.strip():
         with st.spinner("🤖 Thinking..."):
-            reply = get_chatbot_reply(user_input,file_path="hospital_dataset.csv")
+            reply = get_chatbot_reply(user_input, filepath="hospital_dataset.csv")
         with chat_container:
             st.markdown(f"<div class='chatbox'><div class='user-msg'>You:</div><div>{user_input}</div></div>", unsafe_allow_html=True)
             st.markdown(f"<div class='chatbox'><div class='bot-msg'>Chatbot:</div><div>{reply}</div></div>", unsafe_allow_html=True)
