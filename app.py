@@ -1,17 +1,14 @@
 import streamlit as st
 from chatbot import get_chatbot_reply
-from thefuzz import process
 
-
-# Set page config for nicer title and icon
+# Set page config with title and icon
 st.set_page_config(
     page_title="🏥 Medical Chatbot",
     page_icon="🩺",
     layout="centered",
 )
 
-
-# Custom CSS for styling with a different button text color (e.g., light yellow)
+# Custom CSS styling for buttons and chatboxes
 st.markdown("""
     <style>
         .stButton>button {
@@ -45,23 +42,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-
-
 st.title("🏥 Medical Chatbot")
-st.write(
-    "Ask me about doctors, hospitals, symptoms, specialties, and availability."
-)
+st.write("Ask me about doctors, hospitals, symptoms, specialties, and availability.")
 
-
-# Container for chat display
+# Container for displaying chat
 chat_container = st.container()
 
-
-# Input form with better UX
 with st.form(key='chat_form', clear_on_submit=True):
     user_input = st.text_area("Enter your health concern and hospital:", max_chars=200, height=80)
     submit_button = st.form_submit_button("Get Recommendation")
-
 
 if submit_button:
     if user_input.strip():
