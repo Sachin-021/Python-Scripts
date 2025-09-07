@@ -9,8 +9,7 @@ import psycopg2.extras
 
 
 # -------------------- Load Environment Variables --------------------
-load_dotenv()
-
+load_dotenv(dotenv_path="c:/Users/Sachi/OneDrive/Documents/Python Scripts/.env")
 
 
 
