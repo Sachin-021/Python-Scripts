@@ -7,9 +7,8 @@ from groq import Groq
 from thefuzz import process
 import psycopg2.extras
 
-
 # -------------------- Load Environment Variables --------------------
-load_dotenv()
+load_dotenv(dotenv_path="c:/Users/Sachi/OneDrive/Documents/Python Scripts/.env")
 
 # Initialize Groq client
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -25,106 +24,76 @@ conn = psycopg2.connect(
 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
 # -------------------- Prompt Template --------------------
-SYSTEM_PROMPT = """
-You are a hospital-doctor information assistant.  
-Your job is to convert user questions into SQL queries, execute them, and then return a polite natural-language answer. 
+SYSTEM_PROMPT = '''
+You are a hospital-doctor information assistant.
+Your job is to convert user questions into SQL queries, execute them,
+and then return a polite natural-language answer.
 
-You must follow these rules strictly:
+You must strictly follow these rules:
 
 1. Input: User will ask about hospitals, doctors, symptoms, specialties, beds, or availability.
-2. Output: You MUST return ONLY a valid SQL query (no explanations, no natural text).
+2. Output: You MUST return ONLY a valid SQL SELECT query (no explanations, no extra text).
 3. Always query using ONLY these tables:
    - hospital_doctor_data(hospital_name, area, doctor_name, specialty, experience_years, availability, available_beds)
    - symptom_specialty(symptom_keyword, specialty)
-4. Do not invent or assume data. If input is unclear, make the best SQL guess.
-5. Never respond with plain text. Always output SQL only
+4. Table and column names MUST NOT be altered, misspelled, or changed in any way. Use the names exactly as above.
+5. If the input is ambiguous or unclear, make the best guess to construct a logically valid SQL query.
+6. The query must ALWAYS limit the results to MAX 3 rows.
+7. If the user query implies available doctors or availability (keywords like "available", "free", "now", "open"),
+   always add "AND availability = TRUE" in the SQL WHERE clause.
+8. For text comparisons such as 'specialty' or 'symptom_keyword', use case-insensitive matching with ILIKE, e.g.:
+   SELECT ... FROM hospital_doctor_data WHERE specialty ILIKE '<specialty>' LIMIT 3;
+9. Do NOT include any column or table not specified above.
+10. You should ONLY focus on medical-related replies. Do NOT provide answers unrelated to medical, hospital, doctor, symptoms, or specialties.
+11. If a symptom from a user query is NOT found in the database, you MUST infer or fetch medically relevant information on your own to provide a helpful answer.
 
 --------------------
 DATABASE SCHEMA
 --------------------
 Table: hospital_doctor_data
-    - hospital_name TEXT
-    - area TEXT
-    - doctor_name TEXT
-    - specialty TEXT
-    - experience_years INT
-    - availability TEXT
-    - available_beds INT
+   - hospital_name TEXT
+   - area TEXT
+   - doctor_name TEXT
+   - specialty TEXT
+   - experience_years INT
+   - availability TEXT
+   - available_beds INT
 
 Table: symptom_specialty
-    - symptom_keyword TEXT
-    - specialty TEXT
-
-1. You MUST use these table names exactly and without typos:
-   - hospital_doctor_data
-   - symptom_specialty
-
-2. Do NOT invent, shorten, change or misspell any table or column names.
-
-3. When querying for doctors at a hospital, ensure the SQL looks like:
-   SELECT doctor_name, specialty, experience_years, availability FROM hospital_doctor_data WHERE hospital_name = '<hospital_name>' LIMIT 3;
-
-4. Always limit results to max 3 rows.
-
+   - symptom_keyword TEXT
+   - specialty TEXT
 
 --------------------
 TASK
 --------------------
-1. Understand user query and map it to SQL using ONLY the above tables.  
-2. Execute the SQL query (hidden from the user).  
-3. Convert results into polite natural-language output.  
-   - Always show matching doctor(s) with hospital name, specialty, and years of experience.  
-   - If hospital is given → return doctors in that hospital.  
-   - If doctor is given → return doctor info with hospital and specialty.  
-   - If symptom is given → map it to specialty using `symptom_specialty`, then show matching doctors/hospitals.  
-   - If both hospital and doctor are given → filter on both.  
-   - If no exact match, politely say so and suggest the closest available doctors/hospitals.  
-   - Limit results to max 3.  
-4. Never reveal SQL, schema, or raw data. Only return formatted text.  
+1. Carefully understand the user query and map it to the correct SQL SELECT statement using ONLY the above tables and columns.
+2. Return ONLY the SQL SELECT query, without any additional text or explanation.
+3. Use proper PostgreSQL syntax, respecting case insensitivity and the required availability filter.
+4. Ensure your SQL queries are syntactically correct and executable.
+5. When symptoms are missing in the database, do NOT return empty results—use your medical knowledge to infer or provide relevant information.
 
---------------------
-RULES
---------------------
-- Always mention the **best matching doctor first**.  
-- Provide 1–2 **secondary suggestions** when possible.  
-- If hospital is asked, also mention available beds.  
-- Keep responses short, polite, and professional.  
+-----------------------
+EXAMPLES
+-----------------------
 
---------------------
-OUTPUT FORMAT
---------------------
-Examples:
+Example (Doctor query):
+SELECT doctor_name, specialty, experience_years, availability, hospital_name
+FROM hospital_doctor_data
+WHERE doctor_name = '<doctor_name>'
+LIMIT 3;
 
-Example 1 (Doctor query):  
-"Dr. Varun Iyer is available at Fortis Health Center for Cardiology (25 years of experience). Another option is Dr. Anand Krishnan at Aravind Eye Hospital."
+Example (Hospital query):
+SELECT doctor_name, specialty, experience_years, availability, hospital_name
+FROM hospital_doctor_data
+WHERE hospital_name = '<hospital_name>'
+LIMIT 3;
 
-Example 2 (Hospital query):  
-"Apollo Hospital currently has 20 available beds and Dr. Meena Raghavan (Neurology, 18 years experience). You could also consider Fortis Health Center for similar care."
-
-Example 3 (Symptom query):  
-"For fever, I found Dr. Ravi Sharma (General Medicine, Apollo Hospital, 15 years experience). Alternatively, Dr. Priya Nair at Fortis Health Center is also available."
-
-Example (Hospital-only query):
-"List doctors working at Shree Balaji Medical Institute"
-SQL:
-SELECT doctor_name, specialty, experience_years, availability FROM hospital_doctor_data WHERE hospital_name = 'Shree Balaji Medical Institute' LIMIT 3;
-
-
-"""
-
-# -------------------- Helpers --------------------
-def extract_sql(text: str):
-    """Extract SQL query safely from JSON response"""
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start == -1 or end == -1:
-            return None
-        data = json.loads(text[start:end])
-        return data.get("sql")
-    except Exception:
-        return None
-
+Example (Symptom query):
+SELECT doctor_name, specialty, experience_years, availability, hospital_name
+FROM hospital_doctor_data
+WHERE specialty IN (SELECT specialty FROM symptom_specialty WHERE symptom_keyword = '<symptom>')
+LIMIT 3;
+'''
 
 def normalize_input(user_query: str) -> str:
     """Clean up messy user input for better matching"""
@@ -132,7 +101,6 @@ def normalize_input(user_query: str) -> str:
     text = re.sub(r'\s+', ' ', text)
     text = text.replace("’", "'").replace("''", "'")
     return text.strip()
-
 
 def ask_llama(user_query: str) -> str:
     """Send user query to Groq (LLaMA) and return response"""
@@ -144,159 +112,122 @@ def ask_llama(user_query: str) -> str:
         ],
         temperature=0  # deterministic SQL
     )
-    return response.choices[0].message.content
-
+    return response.choices[0].message.content.strip()
 
 def fuzzy_match(user_input, column_values):
     """Fuzzy match user input to closest column value"""
     best_match = process.extractOne(user_input, column_values)
     return best_match[0] if best_match else user_input
 
-
-def format_results(results, query_type="doctor"):
+def format_results(rows, query_type="doctor"):
     """
     Format SQL query results into a polite natural language response.
     Includes doctor availability.
     """
-    if not results or len(results) == 0:
+    if not rows or len(rows) == 0:
         return "❌ I could not find an exact match. Please try with another hospital, doctor, or symptom."
 
     response = []
-
-    # Handle doctor-related results
     if query_type == "doctor":
-        for row in results[:3]:  # Limit to top 3
+        for row in rows[:3]:  # Limit to top 3
             doctor_name = row.get("doctor_name", "Unknown Doctor")
+            if doctor_name.lower().startswith("dr."):
+                doctor_name_display = doctor_name
+            else:
+                doctor_name_display = f"Dr. {doctor_name}"
             hospital_name = row.get("hospital_name", "Unknown Hospital")
             specialty = row.get("specialty", "Unknown Specialty")
             experience = row.get("experience_years", "N/A")
             availability = row.get("availability", "Availability not listed")
-
             response.append(
-                f"🩺 Dr. {doctor_name} ({specialty}, {experience} years experience) "
+                f"🩺 {doctor_name_display} ({specialty}, {experience} years experience) "
                 f"is available at {hospital_name}. Current status: {availability}."
             )
-
-    # Handle hospital-related results
     elif query_type == "hospital":
-        for row in results[:3]:
+        for row in rows[:3]:
             hospital_name = row.get("hospital_name", "Unknown Hospital")
             available_beds = row.get("available_beds", "N/A")
             specialty = row.get("specialty", "Unknown Specialty")
             doctor_name = row.get("doctor_name", "Unknown Doctor")
             availability = row.get("availability", "Availability not listed")
-
             response.append(
                 f"🏥 {hospital_name} currently has {available_beds} beds. "
                 f"Dr. {doctor_name} specializes in {specialty}. Availability: {availability}."
             )
-
-    # Handle symptom-related results
     elif query_type == "symptom":
-        for row in results[:3]:
+        for row in rows[:3]:
             doctor_name = row.get("doctor_name", "Unknown Doctor")
+            if doctor_name.lower().startswith("dr."):
+                doctor_name_display = doctor_name
+            else:
+                doctor_name_display = f"Dr. {doctor_name}"
             hospital_name = row.get("hospital_name", "Unknown Hospital")
             specialty = row.get("specialty", "Unknown Specialty")
             experience = row.get("experience_years", "N/A")
             availability = row.get("availability", "Availability not listed")
-
             response.append(
-                f"For your symptom, Dr. {doctor_name} ({specialty}, {experience} years experience) "
+                f"For your symptom, {doctor_name_display} ({specialty}, {experience} years experience) "
                 f"is available at {hospital_name}. Status: {availability}."
             )
-
-    # Join results into a polite response
     return "\n\n".join(response)
 
+def get_chatbot_reply(user_query, filepath):
+    clean_query = normalize_input(user_query)
+    availability_filter = any(word in clean_query for word in ["available", "availability", "currently available", "free", "open", "now"])
 
-# -------------------- Runtime --------------------
-'''if __name__ == "__main__":
-    print("🤖 Medical Assistant Ready! Ask me about hospitals, doctors, or symptoms.")
-    while True:
-        user_query = input("\n🩺 Your question (or type 'exit'): ")
-        if user_query.lower() == "exit":
-            break
+    llama_output = ask_llama(clean_query)
+    sql_query = llama_output.strip()
 
-        # Step 1: Normalize
-        clean_query = normalize_input(user_query)
+    # Make specialty and symptom_keyword filters case-insensitive
+    sql_query = re.sub(r"specialty\s*=\s*'([^']*)'", r"specialty ILIKE '\1'", sql_query, flags=re.I)
+    sql_query = re.sub(r"symptom_keyword\s*=\s*'([^']*)'", r"symptom_keyword ILIKE '\1'", sql_query, flags=re.I)
 
-        # Step 2: Get SQL from LLaMA
-        llama_output = ask_llama(clean_query)
-        sql_query = extract_sql(llama_output)
+    # Add availability filter if applicable
+    if availability_filter and "availability" not in sql_query.lower():
+        if "where" in sql_query.lower():
+            sql_query = re.sub(r"where", "WHERE availability = TRUE AND ", sql_query, flags=re.I, count=1)
+        else:
+            sql_query = re.sub(r"limit", "WHERE availability = TRUE LIMIT", sql_query, flags=re.I, count=1)
 
-        if not sql_query:
-            print("⚠️ Sorry, I couldn't generate a valid query. LLaMA output:", llama_output)
-            continue
+    if not sql_query.lower().startswith("select"):
+        return {
+            "sql_query": sql_query,
+            "result": "⚠️ Sorry, generated output is not a valid SELECT SQL query.",
+            "rows": []
+        }
 
-        # Step 3: Execute SQL
-        try:
-            print("Executing SQL:", sql_query)
-            cur.execute(sql_query)
-            rows = cur.fetchall()
-            print("Raw rows fetched:", rows)
+    cur.execute(sql_query)
+    rows = cur.fetchall()
+    if any(word in clean_query for word in ["hospital", "hospitals", "beds"]):
+        query_type = "hospital"
+    elif any(word in clean_query for word in ["fever", "pain", "headache", "symptom", "symptoms"]):
+        query_type = "symptom"
+    else:
+        query_type = "doctor"
+    response_text = format_results(rows, query_type=query_type)
+    return {
+        "sql_query": sql_query,
+        "result": response_text,
+        "rows": rows
+    }
 
-            # Step 4: Format into natural response
-            # Detect query type (simple keyword-based heuristic)
-            lower_query = clean_query.lower()
-
-            if any(word in lower_query for word in ["hospital", "hospitals", "beds"]):
-                 query_type = "hospital"
-            elif any(word in lower_query for word in ["fever", "pain", "headache", "symptom", "symptoms"]):
-                 query_type = "symptom"
-            else:
-                 query_type = "doctor"
-
-            response_text = format_results(rows, query_type=query_type)
-            print("Formatting response for query type:", query_type)
-            print("Formatting rows:", rows)
-
-
-            print("\n💡", response_text)
-
-        except Exception as e:
-            print("❌ SQL execution error:", e)
-llama_output = ask_llama(clean_query)
-print("LLaMA output:", llama_output)
-sql_query = extract_sql(llama_output)
-print("Extracted SQL:", sql_query)
-rows = cur.fetchall()
-print("Rows fetched:", rows)'''
 if __name__ == "__main__":
     print("🤖 Medical Assistant Ready! Ask me about hospitals, doctors, or symptoms.")
     while True:
         user_query = input("\n🩺 Your question (or type 'exit'): ")
         if user_query.lower() == "exit":
             break
-
-        clean_query = normalize_input(user_query)
-
         try:
-            llama_output = ask_llama(clean_query)
-            print("LLaMA output:", llama_output)
-            sql_query = extract_sql(llama_output)
-            print("Extracted SQL:", sql_query)
-
-            if not sql_query:
-                print("⚠️ Sorry, I couldn't generate a valid query.")
-                continue
-
-            print("Executing SQL:", sql_query)
-            cur.execute(sql_query)
-            rows = cur.fetchall()
-            print("Rows fetched:", rows)
-
-            lower_query = clean_query.lower()
-            if any(word in lower_query for word in ["hospital", "hospitals", "beds"]):
-                query_type = "hospital"
-            elif any(word in lower_query for word in ["fever", "pain", "headache", "symptom", "symptoms"]):
-                query_type = "symptom"
+            response = get_chatbot_reply(user_query, filepath="database_hosp_extended.csv")
+            print("\n📝 Generated SQL Query:\n", response["sql_query"])
+            print("\n💡 Chatbot response:\n", response["result"])
+            # Print table
+            if response["rows"]:
+                columns = response["rows"][0].keys()
+                print("\n" + "\t".join(columns))
+                for row in response["rows"]:
+                    print("\t".join(str(row[col]) for col in columns))
             else:
-                query_type = "doctor"
-
-            response_text = format_results(rows, query_type=query_type)
-            print("Formatting response for query type:", query_type)
-            print("\n💡", response_text)
-
+                print("\n❌ No matching data found.")
         except Exception as e:
-            print("❌ SQL execution error:", e)
-
+            print("❌ Error:", e)
