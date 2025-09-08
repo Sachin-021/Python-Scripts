@@ -42,10 +42,11 @@ You must strictly follow these rules:
 7. If the user query implies available doctors or availability (keywords like "available", "free", "now", "open"),
    always add "AND availability = TRUE" in the SQL WHERE clause.
 8. For text comparisons such as 'specialty' or 'symptom_keyword', use case-insensitive matching with ILIKE, e.g.:
-   SELECT ... FROM hospital_doctor_data WHERE specialty ILIKE '<specialty>' LIMIT 3;
+   SELECT ... FROM hospital_doctor_data WHERE specialty ILIKE '<specialty>' LIMIT 1;
 9. Do NOT include any column or table not specified above.
 10. You should ONLY focus on medical-related replies. Do NOT provide answers unrelated to medical, hospital, doctor, symptoms, or specialties.
 11. If a symptom from a user query is NOT found in the database, you MUST infer or fetch medically relevant information on your own to provide a helpful answer.
+12. If the doctor is asked from any hospital give the necessary doctor dont make limit 3.
 
 --------------------
 DATABASE SCHEMA
@@ -80,19 +81,19 @@ Example (Doctor query):
 SELECT doctor_name, specialty, experience_years, availability, hospital_name
 FROM hospital_doctor_data
 WHERE doctor_name = '<doctor_name>'
-LIMIT 3;
+LIMIT 1;
 
 Example (Hospital query):
 SELECT doctor_name, specialty, experience_years, availability, hospital_name
 FROM hospital_doctor_data
 WHERE hospital_name = '<hospital_name>'
-LIMIT 3;
+LIMIT 1;
 
 Example (Symptom query):
 SELECT doctor_name, specialty, experience_years, availability, hospital_name
 FROM hospital_doctor_data
 WHERE specialty IN (SELECT specialty FROM symptom_specialty WHERE symptom_keyword = '<symptom>')
-LIMIT 3;
+LIMIT 1;
 '''
 
 def normalize_input(user_query: str) -> str:

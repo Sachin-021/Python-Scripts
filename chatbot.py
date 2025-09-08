@@ -50,7 +50,10 @@ You must strictly follow these rules:
    SELECT ... FROM hospital_doctor_data WHERE specialty ILIKE '<specialty>' LIMIT 3;  
 9. Do NOT include any column or table not specified above.  
 10. You should ONLY focus on medical-related replies. Do NOT provide answers unrelated to medical, hospital, doctor, symptoms, or specialties.  
-11. If a symptom from a user query is NOT found in the database, you MUST infer or fetch medically relevant information on your own to provide a helpful answer.  
+11. If a symptom from a user query is NOT found in the database, you MUST infer or fetch medically relevant information on your own to provide a helpful answer.
+12. If user asks for many/all doctors/hospitals, do NOT use LIMIT. Only limit when the query is specific.
+13. Always return a SQL SELECT query.
+14. Always use medically relevant fallback if results are absent.  
 
 --------------------  
 DATABASE SCHEMA  
@@ -208,7 +211,12 @@ def get_chatbot_reply(user_query, filepath):
             sql_query = re.sub(r"limit", "WHERE availability = TRUE LIMIT", sql_query, flags=re.I, count=1)
 
     if not sql_query.lower().startswith("select"):
-        return "⚠️ Sorry, generated output is not a valid SELECT SQL query."
+        return {
+            "sql_query": sql_query,
+            "result": "⚠️ Sorry, generated output is not a valid SELECT SQL query.",
+            "rows": [],
+            "nlp_suggestion": ""
+        }
 
     cur.execute(sql_query)
     rows = cur.fetchall()
@@ -222,7 +230,19 @@ def get_chatbot_reply(user_query, filepath):
         query_type = "doctor"
 
     response_text = format_results(rows, query_type=query_type)
-    return response_text
+
+    # Optionally use NLP fallback if no results (dummy example)
+    nlp_suggestion = ""
+    if not rows:
+        nlp_suggestion = "You may try rephrasing your query or consider seeing a general physician for basic symptoms."
+
+    # Return dictionary with all relevant outputs
+    return {
+        "sql_query": sql_query,
+        "result": response_text,
+        "rows": rows,
+        "nlp_suggestion": nlp_suggestion
+    }
 
 
 if __name__ == "__main__":
@@ -234,6 +254,24 @@ if __name__ == "__main__":
 
         try:
             response = get_chatbot_reply(user_query, filepath="database_hosp_extended.csv")
-            print("\n💡 Chatbot response:\n", response)
+            print("\n📝 Generated SQL Query:\n", response.get("sql_query", ""))
+            print("\n💡 Chatbot Response:\n", response.get("result", ""))
+
+            # Print table if data exists
+            rows = response.get("rows", [])
+            if rows:
+                columns = rows[0].keys()
+                print("\nResults Table:")
+                print("\t".join(columns))
+                for row in rows:
+                    print("\t".join(str(row[col]) for col in columns))
+            else:
+                print("\n❌ No matching records found.")
+
+            # Print NLP suggestions if any
+            nlp_suggestion = response.get("nlp_suggestion", "")
+            if nlp_suggestion:
+                print("\n💡 NLP Suggestion:\n", nlp_suggestion)
+
         except Exception as e:
-            print("❌ Error:", e)
+            print("❌ Unexpected error:", e)
